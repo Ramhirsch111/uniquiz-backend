@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UniQuiz - כניסה</title>
+    <title>UniQuiz</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;700&display=swap" rel="stylesheet">
@@ -17,9 +17,10 @@
         <button onclick="joinGame()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform active:scale-95">הכנס למשחק 🚀</button>
     </div>
 
-    <div id="waiting-screen" class="hidden text-center">
+    <div id="waiting-screen" class="hidden text-center w-full max-w-md">
         <div class="animate-bounce text-6xl mb-4">⏳</div>
-        <h2 class="text-2xl font-bold text-gray-700 animate-pulse">ממתין למרצה שיפעיל את השאלה...</h2>
+        <h2 class="text-2xl font-bold text-gray-700 animate-pulse" id="wait-msg">ממתין למרצה...</h2>
+        <div class="mt-4 text-gray-500">מחובר כ: <span id="my-name-display" class="font-bold"></span></div>
     </div>
 
     <div id="game-screen" class="hidden w-full max-w-lg">
@@ -36,66 +37,89 @@
 
     <script>
         const socket = io();
-        let myName = "";
+        let myId = "";
+
+        socket.on('connect', () => {
+            console.log("Connected to server:", socket.id);
+            myId = socket.id;
+        });
 
         function joinGame() {
             const input = document.getElementById('username');
             if (input.value.trim()) {
-                myName = input.value;
-                socket.emit('join_game', myName);
+                const name = input.value;
+                // שליחת הפקודה הנכונה 'join'
+                socket.emit('join', name);
+                document.getElementById('my-name-display').innerText = name;
                 document.getElementById('login-screen').classList.add('hidden');
-                document.getElementById('waiting-screen').classList.remove('hidden');
             }
         }
 
-        socket.on('question_start', (q) => {
-            document.getElementById('waiting-screen').classList.add('hidden');
-            document.getElementById('result-screen').classList.add('hidden');
-            document.getElementById('game-screen').classList.remove('hidden');
+        socket.on('state_update', (state) => {
+            console.log("State update received:", state);
             
+            const me = state.players.find(p => p.id === myId);
+            
+            // ניהול מסכים
+            if (document.getElementById('login-screen').classList.contains('hidden')) {
+                document.getElementById('waiting-screen').classList.add('hidden');
+                document.getElementById('game-screen').classList.add('hidden');
+                document.getElementById('result-screen').classList.add('hidden');
+
+                if (state.gameState === 'WAITING' || state.gameState === 'LEADERBOARD') {
+                    document.getElementById('waiting-screen').classList.remove('hidden');
+                    document.getElementById('wait-msg').innerText = "ממתין למרצה...";
+                } 
+                else if (state.gameState === 'QUESTION_ACTIVE') {
+                    if (me && me.hasAnswered) {
+                        document.getElementById('waiting-screen').classList.remove('hidden');
+                        document.getElementById('wait-msg').innerText = "תשובה נקלטה! ממתין...";
+                    } else {
+                        renderQuestion(state.currentQuestion);
+                    }
+                } 
+                else if (state.gameState === 'QUESTION_RESULT') {
+                    document.getElementById('result-screen').classList.remove('hidden');
+                    updateResultScreen(me);
+                }
+            }
+        });
+
+        function renderQuestion(q) {
+            if (!q) return;
+            document.getElementById('game-screen').classList.remove('hidden');
             document.getElementById('question-text').innerText = q.text;
             const container = document.getElementById('options-container');
             container.innerHTML = '';
             
-            // צבעים לכפתורים (כמו בקהוט)
             const colors = ['bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-green-500'];
-            
             q.options.forEach((opt, index) => {
                 const btn = document.createElement('button');
-                const colorClass = colors[index % colors.length];
-                btn.className = `${colorClass} text-white p-6 rounded-xl shadow-md hover:opacity-90 transition font-bold text-xl text-right`;
+                btn.className = `${colors[index % colors.length]} text-white p-6 rounded-xl shadow-md hover:opacity-90 transition font-bold text-xl text-right`;
                 btn.innerText = opt;
-                btn.onclick = () => {
-                    socket.emit('submit_answer', { answerIndex: index });
-                    document.getElementById('game-screen').classList.add('hidden');
-                    document.getElementById('waiting-screen').classList.remove('hidden');
-                    const waitTitle = document.getElementById('waiting-screen').querySelector('h2');
-                    waitTitle.innerText = "תשובה נשלחה! ממתין לתוצאות...";
-                };
+                btn.onclick = () => socket.emit('submit_answer', index);
                 container.appendChild(btn);
             });
-        });
+        }
 
-        socket.on('round_end', (data) => {
-            document.getElementById('waiting-screen').classList.add('hidden');
-            document.getElementById('game-screen').classList.add('hidden');
-            document.getElementById('result-screen').classList.remove('hidden');
-            
+        function updateResultScreen(me) {
             const msg = document.getElementById('result-msg');
-            const score = document.getElementById('score');
             const icon = document.getElementById('result-icon');
+            const score = document.getElementById('score');
             
-            if (data.correct) {
-                msg.innerText = "נכון מאוד!";
-                msg.className = "text-3xl font-bold mb-2 text-green-600";
-                icon.innerText = "🏆";
-            } else {
-                msg.innerText = "לא נורא...";
-                msg.className = "text-3xl font-bold mb-2 text-red-600";
-                icon.innerText = "❌";
+            if (me) {
+                score.innerText = me.score;
+                if (me.lastAnswerCorrect) {
+                    msg.innerText = "נכון מאוד!";
+                    msg.className = "text-3xl font-bold mb-2 text-green-600";
+                    icon.innerText = "🏆";
+                } else {
+                    msg.innerText = "לא נורא...";
+                    msg.className = "text-3xl font-bold mb-2 text-red-600";
+                    icon.innerText = "❌";
+                }
             }
-            score.innerText = data.score;
-        });
+        }
     </script>
 </body>
 </html>
