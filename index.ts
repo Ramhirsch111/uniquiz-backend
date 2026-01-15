@@ -6,6 +6,10 @@ import cors from "cors";
 const app = express();
 app.use(cors());
 
+// --- הוספנו את השורה הזו כדי לחשוף את תיקיית public ---
+app.use(express.static('public'));
+// -----------------------------------------------------
+
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
