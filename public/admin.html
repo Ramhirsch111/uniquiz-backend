@@ -2,47 +2,104 @@
 <html dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ניהול חידון</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-800 text-white min-h-screen p-8">
-    <div class="max-w-4xl mx-auto">
+<body class="bg-gray-900 text-white min-h-screen p-8">
+    <div class="max-w-6xl mx-auto">
         <div class="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
-            <h1 class="text-3xl font-bold">לוח בקרה - מרצה</h1>
-            <div class="text-xl">מחוברים: <span id="player-count" class="font-mono text-green-400">0</span></div>
+            <h1 class="text-3xl font-bold text-blue-400">UniQuiz Control</h1>
+            <div class="text-xl">סטטוס: <span id="game-status" class="font-mono font-bold text-yellow-400">WAITING</span></div>
         </div>
 
-        <div class="grid grid-cols-2 gap-8">
-            <div class="bg-gray-700 p-6 rounded-lg">
-                <h2 class="text-xl mb-4 font-bold text-gray-300">בקרת משחק</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+                <h2 class="text-xl mb-6 font-bold text-gray-300 border-b border-gray-600 pb-2">🎮 בקרת משחק</h2>
                 <div class="space-y-4">
-                    <button onclick="socket.emit('start_game')" class="w-full bg-green-600 hover:bg-green-700 text-white p-4 rounded font-bold text-lg">
-                        ▶ התחל משחק / שאלה ראשונה
+                    <button onclick="socket.emit('start_game')" class="w-full bg-green-600 hover:bg-green-700 py-4 rounded-lg font-bold text-xl shadow transition">
+                        ▶ התחל משחק חדש
                     </button>
-                    <button onclick="socket.emit('next_question')" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-4 rounded font-bold text-lg">
-                        ⏭ השאלה הבאה
+                    
+                    <div class="h-4"></div> <button onclick="socket.emit('admin_next')" class="w-full bg-blue-600 hover:bg-blue-700 py-4 rounded-lg font-bold text-xl shadow transition">
+                        ⏭ השלב הבא / שאלה הבאה
                     </button>
+                </div>
+
+                <div class="mt-8 p-4 bg-gray-700 rounded-lg text-center">
+                    <div class="text-gray-400 text-sm mb-1">תשובות לשאלה הנוכחית</div>
+                    <div class="text-5xl font-bold text-white" id="answers-count">0</div>
                 </div>
             </div>
 
-            <div class="bg-gray-700 p-6 rounded-lg">
-                <h2 class="text-xl mb-4 font-bold text-gray-300">סטטוס בזמן אמת</h2>
-                <div class="text-center py-8">
-                    <div class="text-6xl font-bold mb-2" id="answers-count">0</div>
-                    <div class="text-gray-400">ענו על השאלה הנוכחית</div>
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg md:col-span-2">
+                <h2 class="text-xl mb-4 font-bold text-gray-300 border-b border-gray-600 pb-2">❓ שאלה נוכחית</h2>
+                <div id="current-question-display" class="text-2xl font-bold leading-relaxed">
+                    עדיין לא התחיל משחק...
                 </div>
+                <div id="correct-answer-display" class="mt-4 text-green-400 font-bold hidden">
+                    </div>
             </div>
+        </div>
+
+        <div class="mt-8 bg-gray-800 p-6 rounded-xl shadow-lg">
+            <h2 class="text-xl mb-4 font-bold text-gray-300 flex justify-between">
+                <span>👥 שחקנים מחוברים</span>
+                <span id="player-count" class="bg-blue-600 px-3 py-1 rounded text-sm">0</span>
+            </h2>
+            <div id="players-list" class="grid grid-cols-2 md:grid-cols-4 gap-4 max-h-64 overflow-y-auto">
+                </div>
         </div>
     </div>
 
     <script>
         const socket = io();
-        
-        socket.on('admin_update', (data) => {
-            document.getElementById('player-count').innerText = data.playersCount;
-            document.getElementById('answers-count').innerText = data.answersCount;
+
+        // בקשה יזומה לקבלת סטטוס בעת טעינת הדף
+        socket.emit('request_state');
+
+        socket.on('state_update', (state) => {
+            console.log("Admin State:", state);
+
+            // עדכון מונה שחקנים
+            document.getElementById('player-count').innerText = state.players.length;
+            document.getElementById('game-status').innerText = state.gameState;
+            document.getElementById('answers-count').innerText = state.totalAnswers;
+
+            // עדכון רשימת שחקנים
+            const list = document.getElementById('players-list');
+            list.innerHTML = '';
+            state.players.forEach(p => {
+                const div = document.createElement('div');
+                div.className = `p-3 rounded border ${p.hasAnswered ? 'bg-green-900 border-green-600' : 'bg-gray-700 border-gray-600'}`;
+                div.innerHTML = `
+                    <div class="font-bold">${p.name}</div>
+                    <div class="text-xs text-gray-400">ניקוד: ${p.score}</div>
+                `;
+                list.appendChild(div);
+            });
+
+            // הצגת השאלה
+            const qDiv = document.getElementById('current-question-display');
+            const ansDiv = document.getElementById('correct-answer-display');
+
+            if (state.currentQuestion) {
+                qDiv.innerText = state.currentQuestion.text;
+                
+                // אם אנחנו בשלב תוצאות - להציג את התשובה הנכונה
+                if (state.gameState === 'QUESTION_RESULT' || state.gameState === 'LEADERBOARD') {
+                    const correctIdx = state.currentQuestion.correctIndex;
+                    const correctText = state.currentQuestion.options[correctIdx];
+                    ansDiv.classList.remove('hidden');
+                    ansDiv.innerText = `תשובה נכונה: ${correctText}`;
+                } else {
+                    ansDiv.classList.add('hidden');
+                }
+            } else {
+                qDiv.innerText = "ממתין לתחילת משחק / אין שאלה פעילה";
+                ansDiv.classList.add('hidden');
+            }
         });
     </script>
 </body>
