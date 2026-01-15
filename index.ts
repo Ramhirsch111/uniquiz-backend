@@ -1,467 +1,134 @@
-import express from "express";
-import { createServer } from "http";
-import { Server } from "socket.io";
-import cors from "cors";
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniQuiz - כניסה</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Rubik', sans-serif; }</style>
+</head>
+<body class="bg-blue-50 min-h-screen flex flex-col items-center justify-center p-4">
 
-const app = express();
-app.use(cors());
+    <div id="login-screen" class="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl text-center">
+        <h1 class="text-3xl font-bold mb-6 text-blue-800">UniQuiz</h1>
+        <input type="text" id="username" class="w-full p-4 border-2 border-gray-200 rounded-xl mb-4 text-right text-lg focus:border-blue-500 outline-none" placeholder="השם שלך...">
+        <button onclick="joinGame()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform active:scale-95">הכנס למשחק 🚀</button>
+    </div>
 
-// --- הוספנו את השורה הזו כדי לחשוף את תיקיית public ---
-app.use(express.static('public'));
-// -----------------------------------------------------
+    <div id="waiting-screen" class="hidden text-center w-full max-w-md">
+        <div class="animate-bounce text-6xl mb-4">⏳</div>
+        <h2 class="text-2xl font-bold text-gray-700 animate-pulse" id="wait-msg">ממתין למרצה...</h2>
+        <div class="mt-4 text-gray-500">מחובר כ: <span id="my-name-display" class="font-bold"></span></div>
+    </div>
 
-const httpServer = createServer(app);
+    <div id="game-screen" class="hidden w-full max-w-lg">
+        <h2 id="question-text" class="text-2xl font-bold mb-8 text-center bg-white p-6 rounded-2xl shadow-md text-gray-800 border-b-4 border-blue-100"></h2>
+        <div id="options-container" class="grid grid-cols-1 gap-4"></div>
+    </div>
 
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-  transports: ["websocket", "polling"],
-});
+    <div id="result-screen" class="hidden text-center w-full max-w-md bg-white p-8 rounded-2xl shadow-xl">
+        <div id="result-icon" class="text-6xl mb-4"></div>
+        <h2 id="result-msg" class="text-3xl font-bold mb-2"></h2>
+        <p class="text-gray-500 text-lg">הניקוד שלך:</p>
+        <p class="text-4xl font-black text-blue-600" id="score">0</p>
+    </div>
 
-// --- Types ---
-interface Question {
-  id: number;
-  text: string;
-  options: string[];
-  correctIndex: number;
-}
+    <script>
+        const socket = io();
+        let myId = "";
 
-enum GameState {
-  WAITING = "WAITING",
-  QUESTION_ACTIVE = "QUESTION_ACTIVE",
-  QUESTION_RESULT = "QUESTION_RESULT",
-  LEADERBOARD = "LEADERBOARD",
-}
+        socket.on('connect', () => {
+            myId = socket.id;
+        });
 
-interface Player {
-  id: string;
-  name: string;
-  score: number;
-  hasAnswered: boolean;
-  lastAnswerCorrect: boolean | null;
-}
+        function joinGame() {
+            const input = document.getElementById('username');
+            if (input.value.trim()) {
+                const name = input.value;
+                // התיקון: הפקודה בשרת היא 'join' ולא 'join_game'
+                socket.emit('join', name);
+                document.getElementById('my-name-display').innerText = name;
+                document.getElementById('login-screen').classList.add('hidden');
+            }
+        }
 
-interface ServerState {
-  gameState: GameState;
-  currentQuestionIndex: number;
-  currentQuestion: Question | null;
-  players: Player[];
-  totalAnswers: number;
-}
+        // התיקון הגדול: השרת שולח state_update שמכיל הכל
+        socket.on('state_update', (state) => {
+            console.log("State update:", state);
+            
+            // מציאת השחקן שלי מתוך הרשימה כדי לדעת ניקוד
+            const me = state.players.find(p => p.id === myId);
+            
+            // הסתרת כל המסכים בהתחלה
+            const screens = ['login-screen', 'waiting-screen', 'game-screen', 'result-screen'];
+            // אם טרם נרשמתי, לא לגעת במסך הכניסה
+            if (!document.getElementById('login-screen').classList.contains('hidden')) return;
 
-// --- Questions Data ---
-const QUESTIONS: Question[] = [
-  {
-    id: 1,
-    text: "מהו התפקיד העיקרי של רכיב ה-AI Agents בהקשר של Tools/Microservices?",
-    options: [
-      "לפרק משימות גדולות לשלבים קטנים ולבצע בקרה",
-      "לנתח את בקשת המשתמש ולהחליט על אסטרטגיה",
-      "לאפשר ל-LLM לבצע פעולות בעולם האמיתי (DB/API)",
-      "לשמור תיעוד של כל הפעולות שבוצעו בעבר",
-    ],
-    correctIndex: 2,
-  },
-  {
-    id: 2,
-    text: "איזה סיכון ייחודי קיים במודל Two-Agent Loop?",
-    options: [
-      "Planner לא ישקיע מספיק מאמץ",
-      "קשה לבצע אימות ביניים (Validation)",
-      "התהליך יסתיים מוקדם מדי",
-      "כניסה ל-Agreement Loop והסכמה על שגיאות",
-    ],
-    correctIndex: 3,
-  },
-  {
-    id: 3,
-    text: "מתי השימוש ב-Prompt Pipeline עדיף על פני פרומפט יחיד?",
-    options: [
-      "כאשר אורך הקונטקסט קטן מאוד",
-      "כאשר רוצים תשובה יצירתית ללא מבנה",
-      "כאשר המשימה חד-פעמית לסיעור מוחות",
-      "כאשר המשימה דורשת פירוק לשלבים ועקביות",
-    ],
-    correctIndex: 3,
-  },
-  {
-    id: 4,
-    text: "מה ההבדל המהותי בין Prompt Injection לבין Jailbreaking?",
-    options: [
-      "Injection ע'י מפתחים, Jailbreak ע'י תוקפים",
-      "Injection דורס הוראות; Jailbreak עוקף בטיחות",
-      "אין הבדל מהותי, שני המונחים זהים",
-      "Injection זה הזיות, Jailbreak זה עקיפת מסנן",
-    ],
-    correctIndex: 1,
-  },
-  {
-    id: 5,
-    text: "לסיכום מאמרים עם ציטוט מדויק, מדוע RAG עדיף על CoT?",
-    options: [
-      "כי CoT אינו מאפשר להסביר תהליך חשיבה",
-      "RAG מחבר למקורות חיצוניים ומפחית הזיות",
-      "כי CoT מגדיל עלות טוקנים משמעותית",
-      "RAG פועל טוב יותר עם Zero-shot",
-    ],
-    correctIndex: 1,
-  },
-  {
-    id: 6,
-    text: "מהו החיסרון המרכזי של Few-shot prompting?",
-    options: [
-      "רגיש מאוד לניסוח המדויק",
-      "בזבוז טוקנים וסיכון ל-Overfitting לדוגמאות",
-      "התוצאות פחות עקביות",
-      "דורש יותר זמן חישוב",
-    ],
-    correctIndex: 1,
-  },
-  {
-    id: 7,
-    text: "כיצד פרמטר Top-p עם ערך של 0.9 משפיע?",
-    options: [
-      "בוחר ממילים עם הסתברות מצטברת של 90%+",
-      "בוחר תמיד את המילה ה-9 הכי סבירה",
-      "מפחית הסתברות ב-10%",
-      "בוחר אקראית מ-90% הפחות סבירות",
-    ],
-    correctIndex: 0,
-  },
-  {
-    id: 8,
-    text: "מדוע עדיף שסוכן LLM ישתמש במחשבון לחישובים?",
-    options: [
-      "כלי חיצוני תמיד מהיר יותר",
-      "מחשבון שומר תוצאה לטווח ארוך",
-      "LLM לא מבין מושגים מתמטיים",
-      "LLM טועה בחישוב; מחשבון הוא דטרמיניסטי",
-    ],
-    correctIndex: 3,
-  },
-  {
-    id: 9,
-    text: "מדידת זמן (אמינות 93%). בוצעו 35 תצפיות. כמה נוספות נדרשות?",
-    options: [
-      "לא נדרשות תצפיות נוספות",
-      "9 תצפיות נוספות",
-      "44 תצפיות נוספות",
-      "2 תצפיות נוספות",
-    ],
-    correctIndex: 1,
-  },
-  {
-    id: 10,
-    text: "אם מגדילים את מספר התצפיות (N), מה קורה לאי-הדיוק (r)?",
-    options: [
-      "לא ניתן לקבוע ללא ערך K",
-      "רמת אי הדיוק תגדל",
-      "רמת אי הדיוק לא תשתנה",
-      "רמת אי הדיוק תקטן",
-    ],
-    correctIndex: 3,
-  },
-  {
-    id: 11,
-    text: "נתון: זמן חיצוני 2, פנימי 1, מכונה 5. מהם H ונצילות?",
-    options: [
-      "H=6, נצילות 83.3%",
-      "H=8, נצילות 71.4%",
-      "H=7, נצילות 42.8%",
-      "H=7, נצילות 71.4%",
-    ],
-    correctIndex: 3,
-  },
-  {
-    id: 12,
-    text: "על פי מודל אשקרופט, מה מייצג הפרמטר An?",
-    options: [
-      "שעות מכונה המתקבלות משעת עובד המפעיל N",
-      "המספר האופטימלי של מכונות לעובד",
-      "העומס הממוצע על העובד",
-      "התפוקה הצפויה לשעה ממערך N מכונות",
-    ],
-    correctIndex: 0,
-  },
-  {
-    id: 13,
-    text: "במודל איילון דטרמיניסטי: t=3, T=10. מה N מקסימלי?",
-    options: ["3.25 מכונות", "4 מכונות", "2 מכונות", "3 מכונות"],
-    correctIndex: 1,
-  },
-  {
-    id: 14,
-    text: "מה ההבדל בין 'p' כתוספת לבין 'p' באשקרופט?",
-    options: [
-      "בשני המקרים זה אותו דבר",
-      "תוספת: קבוע לזמן; אשקרופט: יחס מחושב",
-      "תוספת: פנימי בלבד; אשקרופט: הכל",
-      "באשקרופט זה קבוע לזמן",
-    ],
-    correctIndex: 1,
-  },
-  {
-    id: 15,
-    text: "במודל אשקרופט, מהו 'זמן חפייה' (tMI)?",
-    options: [
-      "זמן המתנת מכונה לקבלת שירות מהעובד",
-      "סך הזמן הפנימי והחיצוני",
-      "הזמן שהעובד ממתין למכונה",
-      "ההפרש בין זמן מחזור לזמן מכונה",
-    ],
-    correctIndex: 0,
-  },
-  {
-    id: 16,
-    text: "דגימה: 5 עובדים, 480 דק', 400 יח', אריזה 25%. מה זמן תקן?",
-    options: ["1.8975 דקות", "1.65 דקות", "9.4875 דקות", "0.3795 דקות"],
-    correctIndex: 1,
-  },
-  {
-    id: 17,
-    text: "נדרשו 5602 תצפיות (אמינות 95%, אי דיוק 4%). מהי P?",
-    options: ["אין פרופורציה לבטלה", "אף תשובה אינה נכונה", "30%", "50%"],
-    correctIndex: 2,
-  },
-  {
-    id: 18,
-    text: "מה אינו יתרון של שיטת דגימת העבודה?",
-    options: [
-      "מספקת מידע מפורט על תנועות הידיים",
-      "מיומנות נמוכה נדרשת מהחוקר",
-      "מאפשרת חקר על מספר תחנות במקביל",
-      "אין צורך במחקר רציף",
-    ],
-    correctIndex: 0,
-  },
-  {
-    id: 19,
-    text: "נתונים: עובד 40, מכונה 120. מהו N אופטימלי לפי איילון?",
-    options: [
-      "N=3. המכונה יקרה, עדיף שהעובד ימתין",
-      "N=4. ניצול מקסימלי של העובד",
-      "N=3. עומס 100% ללא חפייה",
-      "N=4. כי 3.66 קרוב ל-4",
-    ],
-    correctIndex: 0,
-  },
-  {
-    id: 20,
-    text: "יתרון מרכזי של דגימת עבודה לעומת חקר רציף?",
-    options: [
-      "מדויקת יותר בחישוב זמן תקן",
-      "דורשת פחות תצפיות וחוסכת משאבים",
-      "מודדת רק תהליכים אוטומטיים",
-      "קובעת תקן לפי ציוד ולא עובדים",
-    ],
-    correctIndex: 1,
-  },
-  {
-    id: 21,
-    text: "אשקרופט: עומס נמוך מאוד והמון מכונות. למה ישאף An?",
-    options: [
-      "לא ניתן לדעת",
-      "ירד בגלל תפוקה שולית פוחתת",
-      "ישאף ל-1 (צוואר בקבוק)",
-      "ישאף ל-N (כמעט אין הפרעות)",
-    ],
-    correctIndex: 3,
-  },
-];
+            screens.slice(1).forEach(s => document.getElementById(s).classList.add('hidden'));
 
-// --- Game State ---
-let gameState: GameState = GameState.WAITING;
-let currentQuestionIndex = 0;
-const players: Map<string, Player> = new Map();
+            // לוגיקת תצוגה לפי GameState מהשרת
+            if (state.gameState === 'WAITING' || state.gameState === 'LEADERBOARD') {
+                document.getElementById('waiting-screen').classList.remove('hidden');
+                document.getElementById('wait-msg').innerText = "ממתין למרצה שיתחיל...";
+            } 
+            
+            else if (state.gameState === 'QUESTION_ACTIVE') {
+                // אם כבר עניתי, להראות מסך המתנה
+                if (me && me.hasAnswered) {
+                    document.getElementById('waiting-screen').classList.remove('hidden');
+                    document.getElementById('wait-msg').innerText = "תשובה נקלטה! ממתין לתוצאות...";
+                } else {
+                    // אחרת להראות את השאלה
+                    renderQuestion(state.currentQuestion);
+                }
+            } 
+            
+            else if (state.gameState === 'QUESTION_RESULT') {
+                document.getElementById('result-screen').classList.remove('hidden');
+                const msg = document.getElementById('result-msg');
+                const icon = document.getElementById('result-icon');
+                const score = document.getElementById('score');
 
-// --- Helper Functions ---
-function getPlayerList(): Player[] {
-  return Array.from(players.values()).map((p) => ({
-    id: p.id,
-    name: p.name,
-    score: p.score,
-    hasAnswered: p.hasAnswered,
-    lastAnswerCorrect: p.lastAnswerCorrect,
-  }));
-}
+                if (me) {
+                    score.innerText = me.score;
+                    if (me.lastAnswerCorrect === true) {
+                        msg.innerText = "נכון מאוד! 👏";
+                        msg.className = "text-3xl font-bold mb-2 text-green-600";
+                        icon.innerText = "🏆";
+                    } else if (me.lastAnswerCorrect === false) {
+                        msg.innerText = "טעות... 😕";
+                        msg.className = "text-3xl font-bold mb-2 text-red-600";
+                        icon.innerText = "❌";
+                    } else {
+                         msg.innerText = "לא ענית בזמן";
+                         icon.innerText = "⌛";
+                    }
+                }
+            }
+        });
 
-function getCurrentQuestion(): Question | null {
-  const currentQ = QUESTIONS[currentQuestionIndex];
-  if (!currentQ) return null;
-
-  return {
-    id: currentQ.id,
-    text: currentQ.text,
-    options: currentQ.options,
-    // Hide correctIndex during active question, reveal during results/leaderboard
-    correctIndex:
-      gameState === GameState.QUESTION_RESULT ||
-      gameState === GameState.LEADERBOARD
-        ? currentQ.correctIndex
-        : -1,
-  };
-}
-
-function getTotalAnswers(): number {
-  return Array.from(players.values()).filter((p) => p.hasAnswered).length;
-}
-
-function broadcastState(): void {
-  const stateUpdate: ServerState = {
-    gameState,
-    currentQuestionIndex,
-    currentQuestion: getCurrentQuestion(),
-    players: getPlayerList(),
-    totalAnswers: getTotalAnswers(),
-  };
-
-  io.emit("state_update", stateUpdate);
-}
-
-function resetPlayers(): void {
-  players.forEach((p) => {
-    p.score = 0;
-    p.hasAnswered = false;
-    p.lastAnswerCorrect = null;
-  });
-}
-
-function resetPlayersForQuestion(): void {
-  players.forEach((p) => {
-    p.hasAnswered = false;
-    p.lastAnswerCorrect = null;
-  });
-}
-
-function handleNextStep(): void {
-  if (gameState === GameState.QUESTION_ACTIVE) {
-    gameState = GameState.QUESTION_RESULT;
-  } else if (gameState === GameState.QUESTION_RESULT) {
-    if (currentQuestionIndex + 1 < QUESTIONS.length) {
-      currentQuestionIndex++;
-      gameState = GameState.QUESTION_ACTIVE;
-      resetPlayersForQuestion();
-    } else {
-      gameState = GameState.LEADERBOARD;
-    }
-  } else if (gameState === GameState.LEADERBOARD) {
-    gameState = GameState.WAITING;
-    currentQuestionIndex = 0;
-    resetPlayers();
-  }
-}
-
-// --- Socket.IO Events ---
-io.on("connection", (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-
-  // Send current state to newly connected client
-  const stateUpdate: ServerState = {
-    gameState,
-    currentQuestionIndex,
-    currentQuestion: getCurrentQuestion(),
-    players: getPlayerList(),
-    totalAnswers: getTotalAnswers(),
-  };
-  socket.emit("state_update", stateUpdate);
-
-  // Handle join event
-  socket.on("join", (name: string) => {
-    const playerName = typeof name === "string" ? name.slice(0, 15) : "Unknown";
-    console.log(`Player joined: ${playerName} (${socket.id})`);
-
-    players.set(socket.id, {
-      id: socket.id,
-      name: playerName,
-      score: 0,
-      hasAnswered: false,
-      lastAnswerCorrect: null,
-    });
-
-    broadcastState();
-  });
-
-  // Handle start_game event
-  socket.on("start_game", () => {
-    console.log("Game started");
-    gameState = GameState.QUESTION_ACTIVE;
-    currentQuestionIndex = 0;
-    resetPlayers();
-    broadcastState();
-  });
-
-  // Handle submit_answer event
-  socket.on("submit_answer", (answerIndex: number) => {
-    const player = players.get(socket.id);
-
-    if (
-      player &&
-      gameState === GameState.QUESTION_ACTIVE &&
-      !player.hasAnswered
-    ) {
-      const currentQ = QUESTIONS[currentQuestionIndex];
-      const isCorrect = answerIndex === currentQ.correctIndex;
-
-      player.hasAnswered = true;
-      player.lastAnswerCorrect = isCorrect;
-
-      if (isCorrect) {
-        player.score += 100;
-      }
-
-      console.log(
-        `Player ${player.name} answered: ${isCorrect ? "correct" : "wrong"}`
-      );
-      broadcastState();
-    }
-  });
-
-  // Handle admin_next event
-  socket.on("admin_next", () => {
-    console.log("Admin next step");
-    handleNextStep();
-    broadcastState();
-  });
-
-  // Handle request_state event
-  socket.on("request_state", () => {
-    const stateUpdate: ServerState = {
-      gameState,
-      currentQuestionIndex,
-      currentQuestion: getCurrentQuestion(),
-      players: getPlayerList(),
-      totalAnswers: getTotalAnswers(),
-    };
-    socket.emit("state_update", stateUpdate);
-  });
-
-  // Handle disconnect
-  socket.on("disconnect", () => {
-    console.log(`Client disconnected: ${socket.id}`);
-    players.delete(socket.id);
-    broadcastState();
-  });
-});
-
-// --- Health Check Endpoint ---
-app.get("/", (_req, res) => {
-  res.json({
-    status: "ok",
-    message: "UniQuiz Socket.IO Server",
-    players: players.size,
-    gameState,
-  });
-});
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "healthy" });
-});
-
-// --- Start Server ---
-const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
-  console.log(`🚀 UniQuiz Server running on port ${PORT}`);
-});
+        function renderQuestion(q) {
+            if (!q) return;
+            document.getElementById('game-screen').classList.remove('hidden');
+            document.getElementById('question-text').innerText = q.text;
+            const container = document.getElementById('options-container');
+            container.innerHTML = '';
+            
+            const colors = ['bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-green-500'];
+            
+            q.options.forEach((opt, index) => {
+                const btn = document.createElement('button');
+                const colorClass = colors[index % colors.length];
+                btn.className = `${colorClass} text-white p-6 rounded-xl shadow-md hover:opacity-90 transition font-bold text-xl text-right`;
+                btn.innerText = opt;
+                btn.onclick = () => {
+                    socket.emit('submit_answer', index); // שליחת האינדקס בלבד
+                };
+                container.appendChild(btn);
+            });
+        }
+    </script>
+</body>
+</html>
